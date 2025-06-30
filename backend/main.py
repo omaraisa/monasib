@@ -1,8 +1,10 @@
 import os
 import json
 import random
+import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from datetime import datetime
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse
@@ -11,6 +13,10 @@ from typing import Dict, Any, Optional
 import geopandas as gpd
 from shapely.geometry import Polygon, Point
 import numpy as np
+
+# Import custom modules
+from config import settings
+from logger import logger
 
 
 # Define the request body models
@@ -175,18 +181,26 @@ async def lifespan(app: FastAPI):
         print(f"Creating database file: {DB_FILE}")
 
         # Generate NYC sample data
-        sample_locations = generate_sample_locations()
+        logger.info("Generating sample location data...")
+        sample_locations = generate_sample_locations(
+            center_lat=settings.default_location_lat,
+            center_lng=settings.default_location_lng,
+            count=settings.sample_locations_count * 3
+        )
         
         # Create restaurants layer (sample existing restaurants)
+        logger.info(f"Creating restaurants layer with {settings.sample_restaurants_count} entries...")
         restaurants_data = []
-        for i in range(20):
+        for i in range(settings.sample_restaurants_count):
             loc = random.choice(sample_locations)
             restaurants_data.append({
                 'id': i + 1,
                 'name': f'Restaurant {i + 1}',
                 'geometry': Point(loc['longitude'], loc['latitude']),
-                'cuisine': random.choice(['Italian', 'Chinese', 'Mexican', 'American', 'Japanese']),
-                'rating': round(random.uniform(3.5, 4.8), 1)
+                'cuisine': random.choice(['Italian', 'Chinese', 'Mexican', 'American', 'Japanese', 'Mediterranean', 'Indian', 'Thai']),
+                'rating': round(random.uniform(3.5, 4.8), 1),
+                'price_range': random.choice(['$', '$$', '$$$', '$$$$']),
+                'established_year': random.randint(2000, 2023)
             })
         
         restaurants_gdf = gpd.GeoDataFrame(restaurants_data, crs="EPSG:4326")
@@ -241,14 +255,21 @@ async def lifespan(app: FastAPI):
     # Shutdown
 
 
-app = FastAPI(lifespan=lifespan, title="Monasib API", version="1.0.0")
-DB_FILE = "gis_data.gpkg"
+app = FastAPI(
+    lifespan=lifespan, 
+    title="Monasib API", 
+    version="1.0.0",
+    description="Restaurant Location Intelligence API",
+    docs_url="/docs",
+    redoc_url="/redoc"
+)
+DB_FILE = settings.database_path
 
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=settings.cors_origins,
+    allow_credentials=settings.cors_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -259,9 +280,99 @@ def read_root():
     return {
         "message": "Monasib Restaurant Location Intelligence API", 
         "version": "1.0.0",
-        "frontend_url": "http://127.0.0.1:8888/app",
-        "api_docs": "http://127.0.0.1:8888/docs"
+        "frontend_url": f"http://{settings.api_host}:{settings.api_port}/app",
+        "api_docs": f"http://{settings.api_host}:{settings.api_port}/docs",
+        "status": "operational",
+        "environment": settings.environment
     }
+
+
+@app.get("/health")
+def health_check():
+    """Health check endpoint for monitoring"""
+    try:
+        # Check database file exists
+        db_status = os.path.exists(settings.database_path)
+        
+        # Check if we can read a layer (basic functionality test)
+        gis_status = False
+        try:
+            if db_status:
+                gdf = gpd.read_file(settings.database_path, layer='restaurants')
+                gis_status = len(gdf) >= 0
+        except:
+            pass
+        
+        health_data = {
+            "status": "healthy" if db_status and gis_status else "unhealthy",
+            "timestamp": datetime.utcnow().isoformat(),
+            "version": "1.0.0",
+            "environment": settings.environment,
+            "checks": {
+                "database": "ok" if db_status else "error",
+                "gis_engine": "ok" if gis_status else "error"
+            },
+            "uptime": "healthy"
+        }
+        
+        status_code = 200 if health_data["status"] == "healthy" else 503
+        logger.info(f"Health check: {health_data['status']}")
+        
+        return JSONResponse(content=health_data, status_code=status_code)
+        
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        return JSONResponse(
+            content={
+                "status": "unhealthy",
+                "timestamp": datetime.utcnow().isoformat(),
+                "error": str(e)
+            },
+            status_code=503
+        )
+
+
+@app.get("/metrics")
+def get_metrics():
+    """Basic metrics endpoint"""
+    try:
+        metrics = {
+            "database_size_mb": round(os.path.getsize(settings.database_path) / 1024 / 1024, 2) if os.path.exists(settings.database_path) else 0,
+            "total_layers": 0,
+            "total_features": 0,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+        # Count layers and features
+        if os.path.exists(settings.database_path):
+            try:
+                # Use geopandas to list layers instead of fiona
+                import sqlite3
+                conn = sqlite3.connect(settings.database_path)
+                cursor = conn.cursor()
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+                tables = cursor.fetchall()
+                metrics["total_layers"] = len([t[0] for t in tables if not t[0].startswith('sqlite_')])
+                conn.close()
+                
+                # Count features in first few layers
+                total_features = 0
+                layer_names = ['restaurants', 'potential_locations', 'transport_stops']
+                for layer in layer_names:
+                    try:
+                        gdf = gpd.read_file(settings.database_path, layer=layer)
+                        total_features += len(gdf)
+                    except:
+                        pass
+                metrics["total_features"] = total_features
+            except Exception:
+                pass
+        
+        return metrics
+        
+    except Exception as e:
+        logger.error(f"Metrics collection failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Metrics unavailable")
 
 
 @app.post("/analysis")
@@ -273,10 +384,19 @@ def perform_analysis(payload: CriteriaPayload):
         criteria = payload.criteria
         
         if not criteria:
+            logger.warning("Analysis requested with no criteria")
             raise HTTPException(status_code=400, detail="No criteria provided")
         
+        logger.info(f"Starting analysis with {len(criteria)} criteria: {list(criteria.keys())}")
+        
         # Generate sample locations for analysis
-        sample_locations = generate_sample_locations(count=200)
+        sample_locations = generate_sample_locations(
+            center_lat=settings.default_location_lat,
+            center_lng=settings.default_location_lng,
+            count=settings.max_analysis_locations
+        )
+        
+        logger.info(f"Generated {len(sample_locations)} sample locations for analysis")
         
         # Calculate suitability scores
         scored_locations = []
@@ -295,6 +415,8 @@ def perform_analysis(payload: CriteriaPayload):
         suitable_locations = [loc for loc in scored_locations if loc['suitability_score'] >= 60]
         best_location = scored_locations[0] if scored_locations else None
         
+        logger.info(f"Analysis completed: {len(suitable_locations)} suitable locations found out of {len(scored_locations)}")
+        
         # Prepare results
         analysis_results = {
             "status": "success",
@@ -312,13 +434,15 @@ def perform_analysis(payload: CriteriaPayload):
                 "average_score": round(np.mean([loc['suitability_score'] for loc in scored_locations]), 2) if scored_locations else 0,
                 "median_score": round(np.median([loc['suitability_score'] for loc in scored_locations]), 2) if scored_locations else 0,
                 "parameters_count": len(criteria),
-                "total_weight": sum(param['weight'] for param in criteria.values())
+                "total_weight": sum(param['weight'] for param in criteria.values()),
+                "analysis_timestamp": datetime.utcnow().isoformat()
             }
         }
         
         return analysis_results
         
     except Exception as e:
+        logger.error(f"Analysis error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Analysis error: {str(e)}")
 
 

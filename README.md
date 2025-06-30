@@ -1,6 +1,27 @@
-# Monasib Project (MVP)
+# Monasib (مناسب) - Restaurant Location Intelligence
 
-This project helps users find the suitable location for initiating a new restaurant.
+<div align="center">
+  <img src="https://img.shields.io/badge/Status-Production%20Ready-success" alt="Status">
+  <img src="https://img.shields.io/badge/Frontend-React%2017-blue" alt="Frontend">
+  <img src="https://img.shields.io/badge/Backend-FastAPI-green" alt="Backend">
+  <img src="https://img.shields.io/badge/GIS-GeoPandas-orange" alt="GIS">
+  <img src="https://img.shields.io/badge/Docker-Ready-2496ED" alt="Docker">
+</div>
+
+## 🌟 Overview
+
+**Monasib** (Arabic: مناسب, meaning "suitable") is a production-ready, intelligent GIS-based platform that helps entrepreneurs and investors find the optimal location for opening new restaurants. Using advanced spatial analysis and customizable criteria, Monasib evaluates potential locations based on 10 key parameters that influence restaurant success.
+
+### ✨ New Features & Improvements
+
+- 🔧 **Production Ready** - Full Docker support, health checks, monitoring
+- 📊 **Enhanced Logging** - Comprehensive logging system with rotation
+- ⚙️ **Configuration Management** - Environment-based configuration with .env support
+- 🚀 **Performance Optimized** - Better error handling and response times
+- 🔒 **Security Enhanced** - CORS configuration, rate limiting ready
+- 📈 **Monitoring Ready** - Health checks, metrics endpoint, Prometheus support
+- 🧪 **Comprehensive Testing** - Updated test suite covering all endpoints
+- 🐳 **Docker Support** - Full containerization with docker-compose
 
 ## Running the project
 

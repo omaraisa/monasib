@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  # Backend API Service
+  monasib-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: monasib-api
+    ports:
+      - "8888:8888"
+    environment:
+      - API_HOST=0.0.0.0
+      - API_PORT=8888
+      - ENVIRONMENT=production
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./backend/logs:/app/logs
+      - ./backend/gis_data.gpkg:/app/gis_data.gpkg
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - monasib-network
+
+  # Frontend Service (Nginx)
+  monasib-frontend:
+    image: nginx:alpine
+    container_name: monasib-frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./frontend:/usr/share/nginx/html
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - monasib-backend
+    restart: unless-stopped
+    networks:
+      - monasib-network
+
+  # Redis for Caching (Optional)
+  monasib-redis:
+    image: redis:7-alpine
+    container_name: monasib-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - monasib-network
+
+  # Monitoring with Prometheus (Optional)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: monasib-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    networks:
+      - monasib-network
+
+networks:
+  monasib-network:
+    driver: bridge
+
+volumes:
+  redis_data:
+  prometheus_data:
