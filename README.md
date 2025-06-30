@@ -30,7 +30,7 @@ This project helps users find the suitable location for initiating a new restaur
     ```bash
     uvicorn main:app --reload
     ```
-7.  The backend API will be available at `http://localhost:8000`.
+7.  The backend API will be available at `http://localhost:8888`.
 
 ## Project Structure
 
